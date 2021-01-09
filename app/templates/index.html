@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html>
+<head>
+	<title>d3.js with leaflet.js</title>
+
+    <script src="https://d3js.org/d3.v5.min.js"></script>
+
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.7.1/dist/leaflet.css"
+      integrity="sha512-xodZBNTC5n17Xt2atTPuE1HxjVMSvLVW9ocqUKLsCC5CXdbqCmblAshOMAS6/keqq/sMZMZ19scR4PsZChSR7A=="
+      crossorigin=""/>
+    <script src="https://unpkg.com/leaflet@1.7.1/dist/leaflet.js"
+      integrity="sha512-XQoYMqMTK8LvdxXYG3nZ448hOEQiglfqkJs1NOQV44cWnUrBc8PkAOcXy20w0vlaXaVUearIOBhiXZ5V3ynxwA=="
+      crossorigin=""></script>
+    <script type='text/javascript' src={{url_for('static', filename='js_scripts/color_scale_functions.js')}}></script>
+    <script src="https://unpkg.com/d3-simple-slider"></script>
+
+</head>
+<body>
+<div class="container">
+    <h2> Hours from now</h2>
+    <div class="row">
+    <div id="slider-simple"></div>
+    </div>
+    <div class="row">
+    <select id="selectButton"></select>
+    </div>
+    <div class="row">
+    <svg id="legend-svg" style="width: 1200px; height: 50px"></svg>
+	</div>
+    <div id="map" style="width: 1200px; height: 800px"></div>
+</div>
+
+	<script type="text/javascript">
+
+    // create array for each hour
+     var data = Array.from({length: 48}, (x, i) => i);
+
+    // list of possible fields. TODO: should be extracted from json
+     var selectOptions = ["temp", "feels_like", "wind_speed", "cloudiness", "precipitation %", "rain", "snow"];
+
+     // add weather options to drop down button
+        var weatherSelector = d3.select("#selectButton")
+          .selectAll('myOptions')
+           .data(selectOptions)
+          .enter()
+          .append('option')
+          .text(function (d) { return d; }) // text showed in the menu
+          .attr("value", function (d) { return d; }); // corresponding value returned by the button
+
+         d3.select("#selectButton").on("change", function(d) {
+               // update scale and recolour items
+               updateScale();
+               updateCircleColours();
+           });
+
+      var sliderSimple = d3
+        .sliderBottom()
+        .min(d3.min(data))
+        .max(d3.max(data))
+        .width(900)
+         .step(1)
+        .tickFormat(d3.format(''))
+        .ticks(d3.max(data))
+        .default(0);
+
+       sliderSimple.on('onchange', val => {
+            updateCircleColours();
+        });
+
+      var gSimple = d3
+        .select('div#slider-simple')
+        .append('svg')
+        .attr('width', 1000)
+        .attr('height', 100)
+        .append('g')
+        .attr('transform', 'translate(30,30)');
+
+      gSimple.call(sliderSimple);
+
+
+    callout = (g, value) => {
+    if (!value) return g.style("display", "none");
+
+    g.style("display", null)
+    .style("pointer-events", "none")
+    .style("font", "10px sans-serif");
+
+    const path = g.selectAll("path")
+        .data([null])
+        .join("path")
+        .attr("fill", "white")
+        .attr("stroke", "black");
+
+    const text = g.selectAll("text")
+        .data([null])
+        .join("text")
+        .call(text => text
+            .selectAll("tspan")
+            .data((value + "").split(/\n/))
+            .join("tspan")
+            .attr("x", 0)
+        .attr("y", (d, i) => `${i * 1.1}em`)
+        .style("font-weight", (_, i) => i ? null : "bold")
+        .text(d => d));
+    const {x, y, width: w, height: h} = text.node().getBBox();
+
+    text.attr("transform", `translate(${-w / 2},${15 - y})`);
+    path.attr("d", `M${-w / 2 - 10},5H-5l5,-5l5,5H${w / 2 + 10}v${h + 20}h-${w + 20}z`);
+
+    }
+
+    // initialise the leaflet map
+    var map = L.map('map').setView([56.9858, -4.1], 8);
+    mapLink =
+        '<a href="http://openstreetmap.org">OpenStreetMap</a>';
+    L.tileLayer(
+        'http://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '&copy; ' + mapLink + ' Contributors',
+        maxZoom: 18,
+        }).addTo(map);
+
+	/* Initialize the SVG layer */
+    var svg = d3.select(map.getPanes().overlayPane).append("svg").attr("width","1200px").attr("height","800px");
+    var svgCircles = svg.append("g");
+
+	/* We simply pick up the SVG from the map object */
+	var svg = d3.select("#map").select("svg");
+
+    // get json data of all munros from flask URL
+    var url = "{{url_for('_get_all_munros') }}";
+    //create circle for each munro using D3
+	d3.json(url).then(collection => {
+		collection.forEach(function(d) {
+			d.LatLng = new L.LatLng(d.lat, d.long);
+		});
+        var selectedOption = d3.select("#selectButton").property("value");
+
+		var feature = svgCircles.selectAll("circle")
+			.data(collection)
+			.enter().append("circle")
+			.style("stroke", "black")
+			.style("opacity", .6)
+			.attr("r", 5)
+            .on('mouseover', function (d, i) {
+                d3.select(this).transition()
+                .duration('1')
+                .attr('opacity', '.2');
+
+                coordinate = d3.mouse(this);
+                //Makes the new div appear on hover:
+                tooltip
+                .attr("transform",`translate(${map.latLngToLayerPoint(d.LatLng).x},${map.latLngToLayerPoint(d.LatLng).y})`)
+                .call(callout,`${d.name}`);
+            })
+            .on('mouseout', function (d, i) {
+                d3.select(this).transition()
+                .duration('1')
+                .attr('opacity', '1');
+                tooltip.call(callout, null);
+            });
+            const tooltip = svg.append("g");
+
+		map.on("zoom", updatePositions);
+        map.on("viewreset", updatePositions);
+		updatePositions();
+        updateScale();
+        updateCircleColours();
+
+	})
+
+    // Function to update positions of circles when map is modified
+    function updatePositions() {
+
+        svgCircles.selectAll("circle").attr("transform",
+            function(d) {
+                return "translate("+
+                    map.latLngToLayerPoint(d.LatLng).x +","+
+                    map.latLngToLayerPoint(d.LatLng).y +")";
+                }
+            )
+
+    }
+
+</script>
+</body>
+</html>
